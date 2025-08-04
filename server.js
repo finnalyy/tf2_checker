@@ -1,57 +1,56 @@
 const express = require('express');
-const fs = require('fs');
+const fs = require('fs-extra');
 const cors = require('cors');
-const bodyParser = require('body-parser');
-const path = require('path');
-
 const app = express();
-const PORT = process.env.PORT || 3000;
-const JSON_PATH = path.join(__dirname, 'known_ids.json');
+const PORT = process.env.PORT || 8080;
+
+const DATA_PATH = './known_ids.json';
 
 app.use(cors());
-app.use(bodyParser.json());
+app.use(express.json());
 
-if (!fs.existsSync(JSON_PATH)) {
-  fs.writeFileSync(JSON_PATH, '{}');
-}
-
-app.get('/known_ids.json', (req, res) => {
-  fs.readFile(JSON_PATH, 'utf8', (err, data) => {
-    if (err) return res.status(500).json({ error: 'Ошибка чтения файла' });
-    res.setHeader('Content-Type', 'application/json');
-    res.send(data);
-  });
+app.get('/known_ids.json', async (req, res) => {
+  try {
+    const data = await fs.readJson(DATA_PATH);
+    res.json(data);
+  } catch (err) {
+    res.status(500).send('Ошибка чтения JSON');
+  }
 });
 
-app.post('/update', (req, res) => {
-  const newUsers = req.body;
-  if (typeof newUsers !== 'object') return res.status(400).json({ error: 'Неверный формат данных' });
+app.post('/save/:id', async (req, res) => {
+  const id = req.params.id;
+  const userData = req.body;
 
-  fs.readFile(JSON_PATH, 'utf8', (err, data) => {
-    let existingData = {};
-    if (!err && data) {
-      try {
-        existingData = JSON.parse(data);
-      } catch (e) {
-        return res.status(500).json({ error: 'Ошибка парсинга существующего JSON' });
-      }
-    }
+  try {
+    const data = await fs.readJson(DATA_PATH);
+    data[id] = userData;
+    await fs.writeJson(DATA_PATH, data, { spaces: 2 });
+    res.send({ success: true });
+  } catch (err) {
+    res.status(500).send('Ошибка сохранения');
+  }
+});
 
-    const updated = { ...existingData, ...newUsers };
+app.post('/comment/:id', async (req, res) => {
+  const id = req.params.id;
+  const { comment } = req.body;
 
-    fs.writeFile(JSON_PATH, JSON.stringify(updated, null, 2), (err) => {
-      if (err) return res.status(500).json({ error: 'Ошибка записи в файл' });
-      res.json({ success: true, message: 'Данные обновлены успешно' });
-    });
-  });
+  try {
+    const data = await fs.readJson(DATA_PATH);
+    if (!data[id]) return res.status(404).send('User not found');
+    data[id].comment = comment;
+    await fs.writeJson(DATA_PATH, data, { spaces: 2 });
+    res.send({ success: true });
+  } catch (err) {
+    res.status(500).send('Ошибка комментария');
+  }
+});
+
+app.get('/health', (req, res) => {
+  res.send('OK');
 });
 
 app.listen(PORT, () => {
-  const isRailway = !!process.env.RAILWAY_ENVIRONMENT;
   console.log(`✅ Сервер запущен на порту ${PORT}`);
-  if (isRailway) {
-    console.log(`🌍 Railway URL будет выглядеть как: https://tf2-checker.up.railway.app`);
-  } else {
-    console.log(`🧪 Локально: http://localhost:${PORT}`);
-  }
 });
