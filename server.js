@@ -1,52 +1,74 @@
 const express = require('express');
-const fs = require('fs-extra');
 const cors = require('cors');
+const sqlite3 = require('sqlite3').verbose();
+
 const app = express();
 const PORT = process.env.PORT || 8080;
-
-const DATA_PATH = './known_ids.json';
 
 app.use(cors());
 app.use(express.json());
 
-app.get('/known_ids.json', async (req, res) => {
-  try {
-    const data = await fs.readJson(DATA_PATH);
-    res.json(data);
-  } catch (err) {
-    res.status(500).send('Ошибка чтения JSON');
-  }
+const db = new sqlite3.Database('./database.db');
+
+// Создание таблицы при первом запуске
+db.serialize(() => {
+  db.run(`
+    CREATE TABLE IF NOT EXISTS users (
+      id TEXT PRIMARY KEY,
+      data TEXT,
+      comment TEXT
+    )
+  `);
 });
 
-app.post('/save/:id', async (req, res) => {
+// Получение всех ID
+app.get('/known_ids.json', (req, res) => {
+  db.all('SELECT id, data, comment FROM users', [], (err, rows) => {
+    if (err) return res.status(500).send('Ошибка чтения БД');
+    const result = {};
+    rows.forEach(row => {
+      result[row.id] = {
+        ...(JSON.parse(row.data || '{}')),
+        ...(row.comment ? { comment: row.comment } : {})
+      };
+    });
+    res.json(result);
+  });
+});
+
+// Сохранение данных по ID
+app.post('/save/:id', (req, res) => {
   const id = req.params.id;
-  const userData = req.body;
+  const userData = JSON.stringify(req.body);
 
-  try {
-    const data = await fs.readJson(DATA_PATH);
-    data[id] = userData;
-    await fs.writeJson(DATA_PATH, data, { spaces: 2 });
-    res.send({ success: true });
-  } catch (err) {
-    res.status(500).send('Ошибка сохранения');
-  }
+  db.run(
+    `INSERT INTO users (id, data) VALUES (?, ?)
+     ON CONFLICT(id) DO UPDATE SET data = excluded.data`,
+    [id, userData],
+    err => {
+      if (err) return res.status(500).send('Ошибка сохранения');
+      res.send({ success: true });
+    }
+  );
 });
 
-app.post('/comment/:id', async (req, res) => {
+// Добавление/обновление комментария
+app.post('/comment/:id', (req, res) => {
   const id = req.params.id;
   const { comment } = req.body;
 
-  try {
-    const data = await fs.readJson(DATA_PATH);
-    if (!data[id]) return res.status(404).send('User not found');
-    data[id].comment = comment;
-    await fs.writeJson(DATA_PATH, data, { spaces: 2 });
-    res.send({ success: true });
-  } catch (err) {
-    res.status(500).send('Ошибка комментария');
-  }
+  db.run(
+    `UPDATE users SET comment = ? WHERE id = ?`,
+    [comment, id],
+    function (err) {
+      if (err) return res.status(500).send('Ошибка комментария');
+      if (this.changes === 0) return res.status(404).send('User not found');
+      res.send({ success: true });
+    }
+  );
 });
 
+// Health check
 app.get('/health', (req, res) => {
   res.send('OK');
 });
