@@ -68,6 +68,23 @@ app.post('/comment/:id', (req, res) => {
   );
 });
 
+app.get('/data', (req, res) => {
+  db.all('SELECT id, data, comment FROM users', [], (err, rows) => {
+    if (err) return res.status(500).send('Ошибка чтения БД');
+    const result = [];
+    rows.forEach(row => {
+      const userData = JSON.parse(row.data || '{}');
+      result.push({
+        steamid64: row.id,
+        ...userData,
+        comment: row.comment || ''
+      });
+    });
+    res.json(result);
+  });
+});
+
+
 // Health check
 app.get('/health', (req, res) => {
   res.send('OK');
